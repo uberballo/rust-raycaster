@@ -5,20 +5,7 @@ use bevy::{
     math::{bounding::RayCast2d, vec2},
     prelude::*,
     sprite::MaterialMesh2dBundle,
-    ui::update,
 };
-
-#[derive(Component)]
-struct Person;
-
-#[derive(Component)]
-struct Name(String);
-
-fn add_people(mut commands: Commands) {
-    commands.spawn((Person, Name("Elaina Proctor".to_string())));
-    commands.spawn((Person, Name("Herra Huu".to_string())));
-    commands.spawn((Person, Name("Wtf wtf".to_string())));
-}
 
 #[derive(Component)]
 struct Wall {
@@ -41,14 +28,9 @@ fn add_walls(mut commands: Commands, window: Query<&Window>) {
     },));
 }
 
-#[derive(Component)]
+#[derive(Component, Debug)]
 struct Player {
     ray: RayCast2d,
-}
-
-#[derive(Resource)]
-struct Game {
-    player: Player,
 }
 
 fn draw_ray(gizmos: &mut Gizmos, ray: &RayCast2d) {
@@ -57,9 +39,6 @@ fn draw_ray(gizmos: &mut Gizmos, ray: &RayCast2d) {
         ray.ray.origin + *ray.ray.direction * ray.max,
         Color::WHITE,
     );
-    for r in [1., 2., 3.] {
-        gizmos.circle_2d(ray.ray.origin, r, Color::FUCHSIA);
-    }
 }
 
 fn get_intersection(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> Option<Vec2> {
@@ -92,72 +71,15 @@ fn intersects(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> bool {
     return ccw(a, c, d) != ccw(b, c, d) && ccw(a, b, c) != ccw(a, b, d);
 }
 
-//fn draw_walls(mut gizmos: Gizmos, query: Query<&Wall>, time: Res<Time>) {
-//    let ray = Vec2::from_array([0.5, 0.5]);
-//    let direction = Vec2::new(time.elapsed_seconds().cos(), time.elapsed_seconds().sin());
-//    let mut dist = 150.;
-//    let mut intersections: Vec<Vec2> = Vec::new();
-//    let aabb_ray = Ray2d {
-//        origin: ray * 50.,
-//        direction: Direction2d::new_unchecked(direction),
-//    };
-//    for wall in &query {
-//        gizmos.line_2d(wall.start, wall.end, Color::WHITE);
-//        if (intersects(
-//            aabb_ray.origin,
-//            aabb_ray.get_point(dist),
-//            wall.start,
-//            wall.end,
-//        )) {
-//            let intersection = get_intersection(
-//                aabb_ray.origin,
-//                aabb_ray.get_point(dist),
-//                wall.start,
-//                wall.end,
-//            );
-//            if let Some(intersection) = intersection {
-//                gizmos.circle_2d(intersection, 10., Color::GREEN);
-//                intersections.push(intersection);
-//            }
-//        }
-//        gizmos.circle_2d(aabb_ray.get_point(dist), 10., Color::BLUE);
-//    }
-//
-//    if !intersections.is_empty() {
-//        let closest = intersections
-//            .iter()
-//            .min_by(|a, b| {
-//                a.distance(aabb_ray.origin)
-//                    .partial_cmp(&b.distance(aabb_ray.origin))
-//                    .unwrap()
-//            })
-//            .unwrap();
-//        dist = aabb_ray.origin.distance(*closest);
-//    }
-//
-//    println!("dist: {}", dist);
-//
-//    let player = Player {
-//        ray: RayCast2d::from_ray(aabb_ray, dist),
-//    };
-//
-//    draw_ray(&mut gizmos, &player.ray);
-//}
+fn get_intersection_point(start: Vec2, end: Vec2, wall: &Wall) -> Option<Vec2> {
+    if (intersects(start, end, wall.start, wall.end)) {
+        return get_intersection(start, end, wall.start, wall.end);
+    }
+    None
+}
 
-fn draw_walls(
-    mut gizmos: Gizmos,
-    query: Query<&Wall>,
-    mut player_query: Query<&mut Player>,
-    time: Res<Time>,
-) {
-    //let ray = Vec2::from_array([0.5, 0.5]);
-    //let direction = Vec2::new(time.elapsed_seconds().cos(), time.elapsed_seconds().sin());
-    //let mut dist = 150.;
+fn draw_walls(mut gizmos: Gizmos, query: Query<&Wall>, mut player_query: Query<&mut Player>) {
     let mut intersections: Vec<Vec2> = Vec::new();
-    //let aabb_ray = Ray2d {
-    //    origin: ray * 50.,
-    //    direction: Direction2d::new_unchecked(direction),
-    //};
     let mut player = player_query.get_single_mut().unwrap();
     let aabb_ray = player.ray.ray;
     let mut dist = player.ray.max;
@@ -180,7 +102,6 @@ fn draw_walls(
                 intersections.push(intersection);
             }
         }
-        gizmos.circle_2d(aabb_ray.get_point(dist), 10., Color::BLUE);
     }
 
     if !intersections.is_empty() {
@@ -194,12 +115,53 @@ fn draw_walls(
             .unwrap();
         dist = aabb_ray.origin.distance(*closest);
     }
+}
 
-    let player = Player {
-        ray: RayCast2d::from_ray(aabb_ray, dist),
-    };
+fn render_shapes(
+    mut gizmos: Gizmos,
+    mut query: Query<(&Shape, &Transform)>,
+    wall_query: Query<&Wall>,
+) {
+    for (shape, transform) in query.iter_mut() {
+        let mut intersections: Vec<Vec2> = Vec::new();
+        let translation = transform.translation.xy();
+        let rotation = Vec2::new(transform.rotation.w, transform.rotation.z);
 
-    draw_ray(&mut gizmos, &player.ray);
+        let mut dist = 150.;
+        let mut end = translation + rotation * dist;
+
+        for wall in &wall_query {
+            if let Some(intersection) = get_intersection_point(translation, end, wall) {
+                intersections.push(intersection);
+            }
+        }
+        if !intersections.is_empty() {
+            let closest = intersections
+                .iter()
+                .min_by(|a, b| {
+                    a.distance(translation)
+                        .partial_cmp(&b.distance(translation))
+                        .unwrap()
+                })
+                .unwrap();
+            dist = translation.distance(*closest);
+            end = translation + rotation * dist;
+        }
+        println!("dist: {:?}", dist);
+
+        match shape {
+            Shape::Line => {
+                gizmos.line_2d(translation, end, Color::WHITE);
+
+                gizmos.circle_2d(end, 10., Color::BLUE);
+            }
+        }
+    }
+}
+
+#[derive(Component, Debug)]
+enum Shape {
+    Line,
 }
 
 fn setup(
@@ -212,18 +174,23 @@ fn setup(
     commands.spawn(Camera2dBundle::default());
     commands.spawn((
         SpatialBundle {
-            transform: Transform::from_xyz(0.0, 0.0, 0.0),
+            transform: Transform {
+                translation: Vec3::new(0.5, 0.5, 0.0),
+                rotation: Quat::from_rotation_z(10.0),
+                scale: Vec3::splat(1.0),
+            },
             ..default()
         },
         Player {
             ray: RayCast2d::from_ray(
                 Ray2d {
-                    origin: Vec2::from_array([0.0, 0.0]).normalize(),
+                    origin: Vec2::from_array([0.5, 0.5]).normalize(),
                     direction: Direction2d::new_unchecked(Vec2::new(0.1, 0.1).normalize()),
                 },
                 150.0,
             ),
         },
+        Shape::Line,
     ));
     commands.spawn(TextBundle::from_section(
         "
@@ -328,48 +295,29 @@ pub struct HelloPlugin;
 
 fn move_player(
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut query: Query<&mut Player>,
-    //mut query: Query<&mut Transform, With<Player>>,
+    mut query: Query<&mut Transform, With<Player>>,
     time: Res<Time>,
 ) {
     for mut transform in &mut query {
-        let mut direction = Vec2::ZERO;
         if keyboard_input.pressed(KeyCode::ArrowUp) {
-            direction.y += 1.;
+            transform.translation.y += time.delta_seconds() * 100.;
         }
         if keyboard_input.pressed(KeyCode::ArrowDown) {
-            direction.y -= 1.;
+            transform.translation.y -= time.delta_seconds() * 100.;
         }
         if keyboard_input.pressed(KeyCode::ArrowLeft) {
-            let direction = Vec2::new(time.elapsed_seconds().cos(), time.elapsed_seconds().sin());
-            //transform.ray.ray.direction = Direction2d::new_unchecked(direction);
+            transform.rotation *= Quat::from_rotation_z(-time.delta_seconds());
         }
         if keyboard_input.pressed(KeyCode::ArrowRight) {
-            //direction.x += 1.;
-            //let res = transform
-            //    .ray
-            //    .ray
-            //    .direction
-            //    .rotate(Vec2::from_array([1.01, 1.01]));
-            //println!("res: {:?}", res.normalize());
-            //println!("direction: {:?}", transform.ray.ray.direction);
-            let x = transform.ray.ray.direction.x;
-            let y = transform.ray.ray.direction.y;
-
-            //let new_direction =
-            //    Vec2::new(transform.ray.ray.direction.x, transform.ray.ray.direction.y)
-            //        * Vec2::new(1.1, 1.1);
-            //println!("new_direction: {:?}", new_direction);
-            //transform.ray.ray.direction = Direction2d::new_unchecked(new_direction.normalize());
+            transform.rotation *= Quat::from_rotation_z(time.delta_seconds());
         }
-        //transform.ray.ray.direction += direction.extend(0.0) * time.delta_seconds();
     }
 }
 
 impl Plugin for HelloPlugin {
     fn build(&self, app: &mut App) {
-        // add things to your app here
         app.add_systems(Startup, (setup, add_walls))
+            .add_systems(PostUpdate, render_shapes)
             .add_systems(FixedUpdate, move_player)
             .add_systems(Update, ((draw_walls).chain(),));
     }
