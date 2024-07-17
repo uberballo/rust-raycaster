@@ -2,9 +2,12 @@ use std::cmp;
 mod player;
 
 use bevy::{
+    gizmos,
     math::{bounding::RayCast2d, vec2},
     prelude::*,
+    render::color,
     sprite::MaterialMesh2dBundle,
+    transform,
 };
 
 #[derive(Component)]
@@ -13,32 +16,28 @@ struct Wall {
     end: Vec2,
 }
 
-fn add_walls(mut commands: Commands, window: Query<&Window>) {
-    let window = window.single();
-    let width = window.width() / 2.;
-    let height = window.height() / 2.;
-    commands.spawn((Wall {
-        start: Vec2::from_array([0.5, -height]),
-        end: Vec2::from_array([0.5, height]),
-    },));
-    println!("width: {}, height: {}", width, height);
-    commands.spawn((Wall {
-        start: Vec2::from_array([-width, -height / 3.5]),
-        end: Vec2::from_array([width, -height / 3.5]),
-    },));
-}
-
 #[derive(Component, Debug)]
 struct Player {
     ray: RayCast2d,
 }
 
-fn draw_ray(gizmos: &mut Gizmos, ray: &RayCast2d) {
-    gizmos.line_2d(
-        ray.ray.origin,
-        ray.ray.origin + *ray.ray.direction * ray.max,
-        Color::WHITE,
-    );
+#[derive(Component, Debug)]
+enum Shape {
+    Line,
+}
+
+fn add_walls(mut commands: Commands, window: Query<&Window>) {
+    let window = window.single();
+    let width = window.width() / 2.;
+    let height = window.height() / 2.;
+    commands.spawn((Wall {
+        start: Vec2::from_array([0.0, -height]),
+        end: Vec2::from_array([0.0, height]),
+    },));
+    commands.spawn((Wall {
+        start: Vec2::from_array([-width, -height / 3.5]),
+        end: Vec2::from_array([width, -height / 3.5]),
+    },));
 }
 
 fn get_intersection(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> Option<Vec2> {
@@ -78,42 +77,9 @@ fn get_intersection_point(start: Vec2, end: Vec2, wall: &Wall) -> Option<Vec2> {
     None
 }
 
-fn draw_walls(mut gizmos: Gizmos, query: Query<&Wall>, mut player_query: Query<&mut Player>) {
-    let mut intersections: Vec<Vec2> = Vec::new();
-    let mut player = player_query.get_single_mut().unwrap();
-    let aabb_ray = player.ray.ray;
-    let mut dist = player.ray.max;
+fn draw_walls(mut gizmos: Gizmos, query: Query<&Wall>) {
     for wall in &query {
         gizmos.line_2d(wall.start, wall.end, Color::WHITE);
-        if (intersects(
-            aabb_ray.origin,
-            aabb_ray.get_point(dist),
-            wall.start,
-            wall.end,
-        )) {
-            let intersection = get_intersection(
-                aabb_ray.origin,
-                aabb_ray.get_point(dist),
-                wall.start,
-                wall.end,
-            );
-            if let Some(intersection) = intersection {
-                gizmos.circle_2d(intersection, 10., Color::GREEN);
-                intersections.push(intersection);
-            }
-        }
-    }
-
-    if !intersections.is_empty() {
-        let closest = intersections
-            .iter()
-            .min_by(|a, b| {
-                a.distance(aabb_ray.origin)
-                    .partial_cmp(&b.distance(aabb_ray.origin))
-                    .unwrap()
-            })
-            .unwrap();
-        dist = aabb_ray.origin.distance(*closest);
     }
 }
 
@@ -125,10 +91,9 @@ fn render_shapes(
     for (shape, transform) in query.iter_mut() {
         let mut intersections: Vec<Vec2> = Vec::new();
         let translation = transform.translation.xy();
-        let rotation = Vec2::new(transform.rotation.w, transform.rotation.z);
-
+        let rotation = Vec2::new(transform.rotation.z, transform.rotation.w);
         let mut dist = 150.;
-        let mut end = translation + rotation * dist;
+        let mut end = translation + (rotation * dist);
 
         for wall in &wall_query {
             if let Some(intersection) = get_intersection_point(translation, end, wall) {
@@ -145,23 +110,16 @@ fn render_shapes(
                 })
                 .unwrap();
             dist = translation.distance(*closest);
-            end = translation + rotation * dist;
+            end = translation + (rotation * dist);
         }
-        println!("dist: {:?}", dist);
 
         match shape {
             Shape::Line => {
                 gizmos.line_2d(translation, end, Color::WHITE);
-
                 gizmos.circle_2d(end, 10., Color::BLUE);
             }
         }
     }
-}
-
-#[derive(Component, Debug)]
-enum Shape {
-    Line,
 }
 
 fn setup(
@@ -174,11 +132,7 @@ fn setup(
     commands.spawn(Camera2dBundle::default());
     commands.spawn((
         SpatialBundle {
-            transform: Transform {
-                translation: Vec3::new(0.5, 0.5, 0.0),
-                rotation: Quat::from_rotation_z(10.0),
-                scale: Vec3::splat(1.0),
-            },
+            transform: Transform::from_xyz(10., 10., 0.),
             ..default()
         },
         Player {
@@ -272,27 +226,6 @@ fn setup(
     });
 }
 
-#[derive(Default, Reflect, GizmoConfigGroup)]
-struct MyRoundGizmos {}
-
-fn draw_gizmo(mut gizmos: Gizmos, mut my_gizmoz: Gizmos<MyRoundGizmos>, time: Res<Time>) {
-    let sin = time.elapsed_seconds().sin() * 10.0;
-
-    //Wall
-    gizmos.line_2d(
-        Vec2::from_array([0.5, -1.]),
-        Vec2::from_array([0.5, 1.0]),
-        Color::RED,
-    );
-    gizmos.line_2d(
-        Vec2::from_array([-100., -100.]),
-        Vec2::from_array([0.5, 1.0]),
-        Color::RED,
-    );
-}
-
-pub struct HelloPlugin;
-
 fn move_player(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut query: Query<&mut Transform, With<Player>>,
@@ -300,33 +233,133 @@ fn move_player(
 ) {
     for mut transform in &mut query {
         if keyboard_input.pressed(KeyCode::ArrowUp) {
-            transform.translation.y += time.delta_seconds() * 100.;
+            let direction = Vec3::new(transform.rotation.z, transform.rotation.w, 0.);
+            let distance = time.delta_seconds() * 100.;
+            transform.translation += distance * direction;
         }
         if keyboard_input.pressed(KeyCode::ArrowDown) {
-            transform.translation.y -= time.delta_seconds() * 100.;
+            let direction = Vec3::new(transform.rotation.z, transform.rotation.w, 0.);
+            let distance = time.delta_seconds() * 100.;
+            transform.translation -= distance * direction;
         }
         if keyboard_input.pressed(KeyCode::ArrowLeft) {
-            transform.rotation *= Quat::from_rotation_z(-time.delta_seconds());
+            transform.rotation *= Quat::from_rotation_z(-time.delta_seconds() * 5.);
         }
         if keyboard_input.pressed(KeyCode::ArrowRight) {
-            transform.rotation *= Quat::from_rotation_z(time.delta_seconds());
+            transform.rotation *= Quat::from_rotation_z(time.delta_seconds() * 5.);
         }
     }
 }
 
-impl Plugin for HelloPlugin {
+pub struct RayCastPlugin;
+
+impl Plugin for RayCastPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, (setup, add_walls))
-            .add_systems(PostUpdate, render_shapes)
-            .add_systems(FixedUpdate, move_player)
-            .add_systems(Update, ((draw_walls).chain(),));
+            .add_systems(PostUpdate, (draw_walls, render_shapes).chain())
+            .add_systems(FixedUpdate, move_player);
     }
+}
+
+pub struct FpsRayCastPlugin;
+
+impl Plugin for FpsRayCastPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, setup_fps_ray_cast)
+            .add_systems(PostUpdate, ray_cast);
+    }
+}
+
+fn cast_ray(ray_angle: f32, original_x: f32, original_y: f32) -> (f32, f32) {
+    let map = [
+        [1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 1, 0, 1, 0, 1, 1, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 1, 1, 0, 1, 0, 0, 1],
+        [1, 0, 1, 0, 0, 1, 0, 0, 1],
+        [1, 0, 0, 1, 0, 1, 1, 1, 1],
+        [1, 0, 0, 0, 0, 0, 0, 0, 1],
+        [1, 0, 1, 0, 0, 0, 0, 0, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1],
+    ];
+    let mut x = original_x;
+    let mut y = original_y;
+    let mut dx = ray_angle.cos();
+    let mut dy = ray_angle.sin();
+    println!("x: {}, y: {}", x, y);
+
+    let mut i = 0;
+    while (map[y.floor() as usize][x.floor() as usize] == 0) {
+        println!("x: {}, y: {}", x, y);
+        x += dx * 0.1;
+        y += dy * 0.1;
+        i += 1;
+        if i > 100 || y < 0. || y > 9. || x < 0. || x > 9. {
+            break;
+        }
+    }
+
+    let distance = ((x - original_x).powf(2.0) + (y - original_y).powf(2.0)).sqrt();
+    let wall_height = 300.0 / distance;
+    return (distance, wall_height);
+}
+
+fn draw_wall_slice(i: f32, wall_height: f32, slice_width: f32, gizmos: &mut Gizmos) {
+    for j in 0..wall_height as i32 {
+        let y_position = (300. - wall_height / 2. + j as f32).floor();
+        let color = Color::RED;
+        gizmos.rect_2d(Vec2::new(i, y_position), 1., Vec2::ONE * slice_width, color);
+    }
+}
+
+fn ray_cast(window: Query<&Window>, query: Query<&Transform, With<Player>>, mut gizmos: Gizmos) {
+    let window = window.single();
+    let rays = 100;
+    let screen_width = 500;
+    //window.width();
+    let slice_width = screen_width as f32 / rays as f32;
+    let angle_step = 60.0 / rays as f32;
+    for transform in &query {
+        for i in 0..rays {
+            let angle = angle_step * i as f32;
+            let (distance, wall_height) = cast_ray(
+                angle.to_radians(),
+                transform.translation.x,
+                transform.translation.y,
+            );
+            draw_wall_slice(
+                i as f32 * slice_width,
+                wall_height,
+                slice_width,
+                &mut gizmos,
+            );
+        }
+    }
+}
+
+fn setup_fps_ray_cast(mut commands: Commands) {
+    commands.spawn(Camera2dBundle::default());
+    commands.spawn((
+        SpatialBundle {
+            transform: Transform::from_xyz(0., 0., 0.),
+            ..default()
+        },
+        Player {
+            ray: RayCast2d::from_ray(
+                Ray2d {
+                    origin: Vec2::from_array([0.5, 0.5]).normalize(),
+                    direction: Direction2d::new_unchecked(Vec2::new(0.1, 0.1).normalize()),
+                },
+                150.0,
+            ),
+        },
+        Shape::Line,
+    ));
 }
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
-        .init_gizmo_group::<MyRoundGizmos>()
-        .add_plugins(HelloPlugin)
+        .add_plugins((DefaultPlugins, FpsRayCastPlugin))
         .run();
 }
