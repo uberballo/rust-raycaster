@@ -1,4 +1,4 @@
-use std::cmp;
+use std::{cmp, f32::consts::PI};
 mod player;
 
 use bevy::{
@@ -6,7 +6,7 @@ use bevy::{
     math::{bounding::RayCast2d, vec2},
     prelude::*,
     render::color,
-    sprite::MaterialMesh2dBundle,
+    sprite::{MaterialMesh2dBundle, Mesh2dHandle},
     transform,
 };
 
@@ -266,7 +266,24 @@ pub struct FpsRayCastPlugin;
 impl Plugin for FpsRayCastPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_fps_ray_cast)
-            .add_systems(PostUpdate, ray_cast);
+            .add_systems(Update, (ray_cast, move_ray_cast_player).chain());
+    }
+}
+
+fn move_ray_cast_player(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut query: Query<&mut Transform, With<Player>>,
+    time: Res<Time>,
+) {
+    for mut transform in &mut query {
+        if keyboard_input.pressed(KeyCode::ArrowUp) {}
+        if keyboard_input.pressed(KeyCode::ArrowDown) {}
+        if keyboard_input.pressed(KeyCode::ArrowLeft) {
+            transform.rotation *= Quat::from_rotation_z(-time.delta_seconds() * 5.);
+        }
+        if keyboard_input.pressed(KeyCode::ArrowRight) {
+            transform.rotation *= Quat::from_rotation_z(time.delta_seconds() * 5.);
+        }
     }
 }
 
@@ -287,15 +304,13 @@ fn cast_ray(ray_angle: f32, original_x: f32, original_y: f32) -> (f32, f32) {
     let mut y = original_y;
     let mut dx = ray_angle.cos();
     let mut dy = ray_angle.sin();
-    println!("x: {}, y: {}", x, y);
 
     let mut i = 0;
     while (map[y.floor() as usize][x.floor() as usize] == 0) {
-        println!("x: {}, y: {}", x, y);
-        x += dx * 0.1;
-        y += dy * 0.1;
+        x += (dx * 0.1);
+        y += (dy * 0.1);
         i += 1;
-        if i > 100 || y < 0. || y > 9. || x < 0. || x > 9. {
+        if i > 100 {
             break;
         }
     }
@@ -305,24 +320,57 @@ fn cast_ray(ray_angle: f32, original_x: f32, original_y: f32) -> (f32, f32) {
     return (distance, wall_height);
 }
 
-fn draw_wall_slice(i: f32, wall_height: f32, slice_width: f32, gizmos: &mut Gizmos) {
+fn draw_wall_slice(
+    i: f32,
+    wall_height: f32,
+    slice_width: f32,
+    dither_pattern_size: f32,
+    distance: f32,
+    gizmos: &mut Gizmos,
+) {
+    let darkness_factor = 1. + (distance / 4.);
+
     for j in 0..wall_height as i32 {
         let y_position = (300. - wall_height / 2. + j as f32).floor();
-        let color = Color::RED;
-        gizmos.rect_2d(Vec2::new(i, y_position), 1., Vec2::ONE * slice_width, color);
+        let dither = if ((i + y_position) % dither_pattern_size) < (dither_pattern_size / 2.) {
+            10.
+        } else {
+            0.
+        };
+
+        let base_color = 180. + dither;
+        let adjusted_color = (base_color / darkness_factor).floor() as f32;
+        let color = Color::rgb_u8(adjusted_color as u8, 0, adjusted_color as u8);
+
+        gizmos.rect_2d(Vec2::new(i, y_position), 0., Vec2::ONE * slice_width, color);
     }
 }
 
 fn ray_cast(window: Query<&Window>, query: Query<&Transform, With<Player>>, mut gizmos: Gizmos) {
     let window = window.single();
-    let rays = 100;
-    let screen_width = 500;
-    //window.width();
+    let rays = 200;
+    let dither_pattern_size = 8.;
+    let screen_width = window.width();
+    let screen_height = window.height();
     let slice_width = screen_width as f32 / rays as f32;
-    let angle_step = 60.0 / rays as f32;
+    let player_fov = PI / 4.;
+    let angle_step = player_fov / rays as f32;
+    //let player_angle = 1.;
+    //gizmos.rect_2d(
+    //    Vec2::new(-screen_width, screen_height),
+    //    0.,
+    //    Vec2::ONE * Vec2::new(screen_width * 4., screen_height * 2.),
+    //    Color::rgb(0.2, 0., 0.2),
+    //);
     for transform in &query {
+        let player_angle = transform.rotation.to_axis_angle().1;
+        println!("Player angle: {}", player_angle);
+
         for i in 0..rays {
-            let angle = angle_step * i as f32;
+            //let angle = angle_step * i as f32;
+            let angle = player_angle - (player_fov / 2.) + i as f32 * angle_step;
+            //const rayAngle = this.player.angle - (this.player.fov / 2) + i * angleStep;
+
             let (distance, wall_height) = cast_ray(
                 angle.to_radians(),
                 transform.translation.x,
@@ -332,17 +380,23 @@ fn ray_cast(window: Query<&Window>, query: Query<&Transform, With<Player>>, mut 
                 i as f32 * slice_width,
                 wall_height,
                 slice_width,
+                dither_pattern_size,
+                distance,
                 &mut gizmos,
             );
         }
     }
 }
 
-fn setup_fps_ray_cast(mut commands: Commands) {
+fn setup_fps_ray_cast(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
     commands.spawn(Camera2dBundle::default());
     commands.spawn((
         SpatialBundle {
-            transform: Transform::from_xyz(0., 0., 0.),
+            transform: Transform::from_xyz(3., 3., 1.),
             ..default()
         },
         Player {
@@ -356,6 +410,12 @@ fn setup_fps_ray_cast(mut commands: Commands) {
         },
         Shape::Line,
     ));
+    commands.spawn(MaterialMesh2dBundle {
+        mesh: meshes.add(Rectangle::default()).into(),
+        transform: Transform::default().with_scale(Vec3::splat(128.)),
+        material: materials.add(Color::PURPLE),
+        ..default()
+    });
 }
 
 fn main() {
