@@ -26,6 +26,11 @@ enum Shape {
     Line,
 }
 
+#[derive(Component, Debug)]
+struct Map {
+    map: [[i32; 9]; 10],
+}
+
 fn add_walls(mut commands: Commands, window: Query<&Window>) {
     let window = window.single();
     let width = window.width() / 2.;
@@ -273,11 +278,28 @@ impl Plugin for FpsRayCastPlugin {
 fn move_ray_cast_player(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut query: Query<&mut Transform, With<Player>>,
+    mut map_query: Query<&mut Map>,
     time: Res<Time>,
 ) {
+    let map = map_query.single_mut();
     for mut transform in &mut query {
-        if keyboard_input.pressed(KeyCode::ArrowUp) {}
-        if keyboard_input.pressed(KeyCode::ArrowDown) {}
+        if keyboard_input.pressed(KeyCode::ArrowUp) {
+            let direction = Vec3::new(transform.rotation.z, transform.rotation.w, 0.);
+            let distance = time.delta_seconds() * 10.;
+
+            let new_direction = transform.translation - distance * direction;
+            if map.map[new_direction.y.floor() as usize][new_direction.x.floor() as usize] == 0 {
+                transform.translation = new_direction;
+            }
+        }
+        if keyboard_input.pressed(KeyCode::ArrowDown) {
+            let direction = Vec3::new(transform.rotation.z, transform.rotation.w, 0.);
+            let distance = time.delta_seconds() * 10.;
+            let new_direction = transform.translation + distance * direction;
+            if map.map[new_direction.y.floor() as usize][new_direction.x.floor() as usize] == 0 {
+                transform.translation = new_direction;
+            }
+        }
         if keyboard_input.pressed(KeyCode::ArrowLeft) {
             transform.rotation *= Quat::from_rotation_z(-time.delta_seconds() * 5.);
         }
@@ -287,26 +309,14 @@ fn move_ray_cast_player(
     }
 }
 
-fn cast_ray(ray_angle: f32, original_x: f32, original_y: f32) -> (f32, f32) {
-    let map = [
-        [1, 1, 1, 1, 1, 1, 1, 1, 1],
-        [1, 0, 0, 0, 0, 0, 0, 0, 1],
-        [1, 0, 1, 0, 1, 0, 1, 1, 1],
-        [1, 0, 0, 0, 0, 0, 0, 0, 1],
-        [1, 0, 1, 1, 0, 1, 0, 0, 1],
-        [1, 0, 1, 0, 0, 1, 0, 0, 1],
-        [1, 0, 0, 1, 0, 1, 1, 1, 1],
-        [1, 0, 0, 0, 0, 0, 0, 0, 1],
-        [1, 0, 1, 0, 0, 0, 0, 0, 1],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1],
-    ];
+fn cast_ray(ray_angle: f32, original_x: f32, original_y: f32, map: &Map) -> (f32, f32) {
     let mut x = original_x;
     let mut y = original_y;
     let mut dx = ray_angle.cos();
     let mut dy = ray_angle.sin();
 
     let mut i = 0;
-    while (map[y.floor() as usize][x.floor() as usize] == 0) {
+    while (map.map[y.floor() as usize][x.floor() as usize] == 0) {
         x += (dx * 0.1);
         y += (dy * 0.1);
         i += 1;
@@ -331,7 +341,7 @@ fn draw_wall_slice(
     let darkness_factor = 1. + (distance / 4.);
 
     for j in 0..wall_height as i32 {
-        let y_position = (300. - wall_height / 2. + j as f32).floor();
+        let y_position = -300. + (300. - wall_height / 2. + j as f32).floor();
         let dither = if ((i + y_position) % dither_pattern_size) < (dither_pattern_size / 2.) {
             10.
         } else {
@@ -342,42 +352,53 @@ fn draw_wall_slice(
         let adjusted_color = (base_color / darkness_factor).floor() as f32;
         let color = Color::rgb_u8(adjusted_color as u8, 0, adjusted_color as u8);
 
-        gizmos.rect_2d(Vec2::new(i, y_position), 0., Vec2::ONE * slice_width, color);
+        gizmos.rect_2d(
+            Vec2::new(i, y_position),
+            0.,
+            //Vec2::ONE * slice_width,
+            Vec2::ONE * Vec2::new(slice_width, wall_height),
+            color,
+        );
     }
 }
 
-fn ray_cast(window: Query<&Window>, query: Query<&Transform, With<Player>>, mut gizmos: Gizmos) {
+fn ray_cast(
+    window: Query<&Window>,
+    query: Query<&Transform, With<Player>>,
+    map_query: Query<&Map>,
+    mut gizmos: Gizmos,
+) {
     let window = window.single();
     let rays = 200;
     let dither_pattern_size = 8.;
     let screen_width = window.width();
     let screen_height = window.height();
+    let y_index = -screen_width / 2.;
+    let x_index = -screen_height / 2.;
     let slice_width = screen_width as f32 / rays as f32;
     let player_fov = PI / 4.;
     let angle_step = player_fov / rays as f32;
-    //let player_angle = 1.;
-    //gizmos.rect_2d(
-    //    Vec2::new(-screen_width, screen_height),
-    //    0.,
-    //    Vec2::ONE * Vec2::new(screen_width * 4., screen_height * 2.),
-    //    Color::rgb(0.2, 0., 0.2),
-    //);
+    let map = map_query.single();
+    gizmos.line_2d(
+        Vec2::new(-screen_width / 2., -screen_height / 2.),
+        Vec2::new(screen_width / 2., screen_height / 2.),
+        Color::RED,
+    );
     for transform in &query {
         let player_angle = transform.rotation.to_axis_angle().1;
-        println!("Player angle: {}", player_angle);
 
         for i in 0..rays {
             //let angle = angle_step * i as f32;
-            let angle = player_angle - (player_fov / 2.) + i as f32 * angle_step;
-            //const rayAngle = this.player.angle - (this.player.fov / 2) + i * angleStep;
+            let angle = player_angle - (player_fov / 2.) + (i as f32 * angle_step);
 
             let (distance, wall_height) = cast_ray(
                 angle.to_radians(),
                 transform.translation.x,
                 transform.translation.y,
+                map,
             );
             draw_wall_slice(
-                i as f32 * slice_width,
+                (-100. + i as f32) * slice_width,
                 wall_height,
                 slice_width,
                 dither_pattern_size,
@@ -392,7 +413,11 @@ fn setup_fps_ray_cast(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    window: Query<&Window>,
 ) {
+    let window = window.single();
+    let width = window.width();
+    let height = window.height();
     commands.spawn(Camera2dBundle::default());
     commands.spawn((
         SpatialBundle {
@@ -409,11 +434,31 @@ fn setup_fps_ray_cast(
             ),
         },
         Shape::Line,
+        Map {
+            map: [
+                [1, 1, 1, 1, 1, 1, 1, 1, 1],
+                [1, 0, 0, 0, 0, 0, 0, 0, 1],
+                [1, 0, 1, 0, 1, 0, 1, 1, 1],
+                [1, 0, 0, 0, 0, 0, 0, 0, 1],
+                [1, 0, 1, 1, 0, 1, 0, 0, 1],
+                [1, 0, 1, 0, 0, 1, 0, 0, 1],
+                [1, 0, 0, 1, 0, 1, 1, 1, 1],
+                [1, 0, 0, 0, 0, 0, 0, 0, 1],
+                [1, 0, 1, 0, 0, 0, 0, 0, 1],
+                [1, 1, 1, 1, 1, 1, 1, 1, 1],
+            ],
+        },
     ));
     commands.spawn(MaterialMesh2dBundle {
-        mesh: meshes.add(Rectangle::default()).into(),
-        transform: Transform::default().with_scale(Vec3::splat(128.)),
-        material: materials.add(Color::PURPLE),
+        mesh: meshes.add(Rectangle::new(width, height)).into(),
+        transform: Transform::from_xyz(0., height / 2., 0.),
+        material: materials.add(Color::rgb_u8(20, 0, 20)),
+        ..default()
+    });
+    commands.spawn(MaterialMesh2dBundle {
+        mesh: meshes.add(Rectangle::new(width, height / 2.)).into(),
+        transform: Transform::from_xyz(0., -height / 4., 0.),
+        material: materials.add(Color::rgb_u8(60, 0, 60)),
         ..default()
     });
 }
