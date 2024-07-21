@@ -28,7 +28,7 @@ enum Shape {
 
 #[derive(Component, Debug)]
 struct Map {
-    map: [[i32; 9]; 10],
+    map: [[i32; 10]; 10],
 }
 
 fn add_walls(mut commands: Commands, window: Query<&Window>) {
@@ -127,11 +127,31 @@ fn render_shapes(
     }
 }
 
-fn setup(
+fn general_setup(mut commands: Commands) {
+    commands.spawn(Camera2dBundle::default());
+    commands.spawn(
+        (Map {
+            map: [
+                [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+                [1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                [1, 0, 1, 0, 1, 0, 1, 1, 0, 1],
+                [1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                [1, 0, 1, 1, 0, 1, 0, 0, 0, 1],
+                [1, 0, 1, 0, 0, 1, 0, 0, 0, 1],
+                [1, 0, 0, 1, 0, 1, 1, 1, 0, 1],
+                [1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                [1, 0, 1, 0, 0, 0, 0, 0, 0, 1],
+                [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            ],
+        }),
+    );
+}
+
+fn raycaster_setup(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    map_query: Query<&Map>,
     window: Query<&Window>,
 ) {
     commands.spawn(Camera2dBundle::default());
@@ -151,53 +171,7 @@ fn setup(
         },
         Shape::Line,
     ));
-    commands.spawn(TextBundle::from_section(
-        "
-    Tekstiä",
-        TextStyle {
-            font: asset_server.load("fonts/FiraSans-Bold.ttf"),
-            font_size: 24.0,
-            color: Color::WHITE,
-        },
-    ));
-    let mut map = [[0u8; 10]; 10];
-    map[0][0] = 1;
-    map[0][1] = 1;
-    map[0][2] = 1;
-    map[0][3] = 1;
-    map[0][4] = 1;
-    map[0][5] = 1;
-    map[0][6] = 1;
-    map[0][7] = 1;
-    map[0][8] = 1;
-    map[0][9] = 1;
-    map[1][0] = 1;
-    map[2][0] = 1;
-    map[3][0] = 1;
-    map[4][0] = 1;
-    map[5][0] = 1;
-    map[6][0] = 1;
-    map[7][0] = 1;
-    map[8][0] = 1;
-    map[9][0] = 1;
-    map[9][1] = 1;
-    map[9][2] = 1;
-    map[9][3] = 1;
-    map[9][4] = 1;
-    map[9][5] = 1;
-    map[9][6] = 1;
-    map[9][7] = 1;
-    map[9][8] = 1;
-    map[9][9] = 1;
-    map[1][9] = 1;
-    map[2][9] = 1;
-    map[3][9] = 1;
-    map[4][9] = 1;
-    map[5][9] = 1;
-    map[6][9] = 1;
-    map[7][9] = 1;
-    map[8][9] = 1;
-
+    let map = map_query.single().map;
     let window = window.single();
     let tile_height = window.height() / 10.;
     let tile_width = window.width() / 10.;
@@ -260,7 +234,7 @@ pub struct RayCastPlugin;
 
 impl Plugin for RayCastPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (setup, add_walls))
+        app.add_systems(Startup, (general_setup, raycaster_setup, add_walls).chain())
             .add_systems(PostUpdate, (draw_walls, render_shapes).chain())
             .add_systems(FixedUpdate, move_player);
     }
@@ -270,7 +244,7 @@ pub struct FpsRayCastPlugin;
 
 impl Plugin for FpsRayCastPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_fps_ray_cast)
+        app.add_systems(Startup, (general_setup, setup_fps_ray_cast).chain())
             .add_systems(Update, (ray_cast, move_ray_cast_player).chain());
     }
 }
@@ -418,7 +392,6 @@ fn setup_fps_ray_cast(
     let window = window.single();
     let width = window.width();
     let height = window.height();
-    commands.spawn(Camera2dBundle::default());
     commands.spawn((
         SpatialBundle {
             transform: Transform::from_xyz(3., 3., 1.),
@@ -434,20 +407,6 @@ fn setup_fps_ray_cast(
             ),
         },
         Shape::Line,
-        Map {
-            map: [
-                [1, 1, 1, 1, 1, 1, 1, 1, 1],
-                [1, 0, 0, 0, 0, 0, 0, 0, 1],
-                [1, 0, 1, 0, 1, 0, 1, 1, 1],
-                [1, 0, 0, 0, 0, 0, 0, 0, 1],
-                [1, 0, 1, 1, 0, 1, 0, 0, 1],
-                [1, 0, 1, 0, 0, 1, 0, 0, 1],
-                [1, 0, 0, 1, 0, 1, 1, 1, 1],
-                [1, 0, 0, 0, 0, 0, 0, 0, 1],
-                [1, 0, 1, 0, 0, 0, 0, 0, 1],
-                [1, 1, 1, 1, 1, 1, 1, 1, 1],
-            ],
-        },
     ));
     commands.spawn(MaterialMesh2dBundle {
         mesh: meshes.add(Rectangle::new(width, height)).into(),
@@ -465,6 +424,6 @@ fn setup_fps_ray_cast(
 
 fn main() {
     App::new()
-        .add_plugins((DefaultPlugins, FpsRayCastPlugin))
+        .add_plugins((DefaultPlugins, RayCastPlugin))
         .run();
 }
